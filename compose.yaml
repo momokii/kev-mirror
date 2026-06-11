@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  github-action-cron:
+    build: .
+    container_name: kev-sync-trigger
+    restart: unless-stopped
+    env_file:
+      - .env
+    # Optional: Set timezone to match your local server for accurate cron timing
+    environment:
+      - TZ=Asia/Jakarta
