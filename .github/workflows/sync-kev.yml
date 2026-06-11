@@ -32,7 +32,7 @@ on:
   schedule:
     - cron: "5,15,25,35,45,55 * * * *"
   # Allow manual runs from the Actions tab (useful for the first run / testing).
-  workflow_dispatch: {}
+  workflow_dispatch:
 
 # Principle of least privilege: grant only what the job needs. The single job
 # below needs write access to push the updated catalog; nothing else.
@@ -45,9 +45,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  sync:
+  scheduled:
     name: Fetch and mirror KEV
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10 # Guardrail: this job should finish in well under a minute.
 
     env:
