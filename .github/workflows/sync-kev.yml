@@ -27,135 +27,28 @@
 name: Sync CISA KEV Catalog
 
 on:
-  # Run daily. CISA typically publishes updates on U.S. business days; the feed
-  # is unchanged on most weekends, in which case this job makes no commit.
+  workflow_dispatch:
   schedule:
     - cron: "5,15,25,35,45,55 * * * *"
-  # Allow manual runs from the Actions tab (useful for the first run / testing).
-  workflow_dispatch:
-
-# Principle of least privilege: grant only what the job needs. The single job
-# below needs write access to push the updated catalog; nothing else.
-permissions:
-  contents: write
-
-# Never let two syncs run concurrently and clobber each other's commits.
-concurrency:
-  group: kev-sync
-  cancel-in-progress: false
 
 jobs:
   scheduled:
-    name: Fetch and mirror KEV
-    runs-on: ubuntu-latest
-    timeout-minutes: 10 # Guardrail: this job should finish in well under a minute.
-
-    env:
-      KEV_URL: "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
-      OUTPUT_FILE: "known_exploited_vulnerabilities.json"
-      # A descriptive User-Agent is good etiquette: it identifies the client
-      # honestly to the origin operator instead of masquerading as a browser.
-      USER_AGENT: "kelanach-KEV-Sync/1.0 (+kelana@protergo.id)"
-      # Emit a warning if the catalog's release date is older than this.
-      STALE_DAYS: "5"
+    runs-on: ubuntu-24.04
 
     steps:
-      # Pin third-party actions to a major version. For stricter supply-chain
-      # hygiene you may pin to a full commit SHA instead.
-      # v6 runs on Node.js 24 (v4 ran on the now-deprecated Node.js 20).
-      - name: Check out repository
-        uses: actions/checkout@v6
+      - name: Checkout repo
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          fetch-depth: 0
 
-      - name: Fetch KEV from authoritative source (cisa.gov)
-        run: |
-          set -euo pipefail
-          # --fail            : treat HTTP >= 400 as an error (no silent 403 body)
-          # --location        : follow redirects
-          # --retry/--retry-* : polite backoff for transient failures only
-          curl \
-            --fail --silent --show-error --location \
-            --retry 4 --retry-delay 10 --retry-all-errors \
-            --connect-timeout 15 --max-time 60 \
-            --user-agent "${USER_AGENT}" \
-            --header "Accept: application/json" \
-            --output kev_fetched.json \
-            "${KEV_URL}"
-          echo "Downloaded $(wc -c < kev_fetched.json) bytes."
+      - name: Scrape CISA KEV
+        run: curl -f --silent --output known_exploited_vulnerabilities.json https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json
 
-      - name: Validate payload and check freshness
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import datetime as dt
-          import json
-          import os
-          import sys
-
-          path = "kev_fetched.json"
-          try:
-              data = json.load(open(path))
-          except json.JSONDecodeError as exc:
-              sys.exit(f"::error::Downloaded file is not valid JSON: {exc}")
-
-          if not isinstance(data, dict):
-              sys.exit("::error::Top-level JSON is not an object.")
-
-          version = data.get("catalogVersion")
-          released = data.get("dateReleased", "")
-          vulns = data.get("vulnerabilities")
-
-          if not version:
-              sys.exit("::error::Missing 'catalogVersion'.")
-          if not isinstance(vulns, list) or not vulns:
-              sys.exit("::error::'vulnerabilities' is missing or empty.")
-
-          # Freshness check (warning only; an unchanged-but-old catalog is valid).
-          stale_days = int(os.environ.get("STALE_DAYS", "5"))
-          age_note = ""
-          try:
-              released_dt = dt.datetime.fromisoformat(released.replace("Z", "+00:00"))
-              age = (dt.datetime.now(dt.timezone.utc) - released_dt).days
-              age_note = f", age={age}d"
-              if age > stale_days:
-                  print(f"::warning::KEV catalog is {age} days old "
-                        f"(threshold {stale_days}d). Verify the upstream feed.")
-          except ValueError:
-              pass
-
-          print(f"VALID: catalogVersion={version}, count={len(vulns)}{age_note}")
-
-          # Expose the version to later steps for the commit message / summary.
-          with open(os.environ["GITHUB_ENV"], "a") as fh:
-              fh.write(f"KEV_VERSION={version}\n")
-              fh.write(f"KEV_COUNT={len(vulns)}\n")
-          PY
-
-      - name: Commit changes (only if the catalog changed)
-        run: |
-          set -euo pipefail
-          mv kev_fetched.json "${OUTPUT_FILE}"
-
-          # Stage the file first, then compare the index against HEAD.
-          # Using `git diff --cached` (instead of a plain `git diff`) is what
-          # makes this correct on the very first run: a brand-new, untracked
-          # file is invisible to `git diff`, but shows up once it is staged.
-          git add "${OUTPUT_FILE}"
-          if git diff --cached --quiet; then
-            echo "No change in KEV catalog; skipping commit."
-            echo "### KEV sync: no change (version ${KEV_VERSION})" >> "${GITHUB_STEP_SUMMARY}"
-            exit 0
-          fi
-
-          # Identity for the automated commit.
-          git config user.name  "kev-sync-bot"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git commit -m "chore(kev): update catalog to ${KEV_VERSION} (${KEV_COUNT} CVEs)"
+      - name: Commit and push if it changed
+        run: |-
+          git config user.name "kelana"
+          git config user.email "kelanachandra7@gmail.com"
+          git add -A
+          timestamp=$(date -u)
+          git commit -m "$(echo -e "Update KEV: $timestamp\n\nSigned-off-by: AboutCode Automation <kelanachandra7@gmail.com>")" || exit 0
           git push
-
-          echo "Committed KEV catalog version ${KEV_VERSION}."
-          {
-            echo "### KEV sync: updated"
-            echo "- **Version:** ${KEV_VERSION}"
-            echo "- **CVEs:** ${KEV_COUNT}"
-          } >> "${GITHUB_STEP_SUMMARY}"
