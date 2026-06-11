@@ -47,7 +47,7 @@ concurrency:
 jobs:
   scheduled:
     name: Fetch and mirror KEV
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 10 # Guardrail: this job should finish in well under a minute.
 
     env:
