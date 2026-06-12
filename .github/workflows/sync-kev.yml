@@ -32,7 +32,7 @@ on:
   # Run daily. CISA typically publishes updates on U.S. business days; the feed
   # is unchanged on most weekends, in which case this job makes no commit.
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "13 0 * * *"
 
 # Principle of least privilege: grant only what the job needs. The single job
 # below needs write access to push the updated catalog; nothing else.
